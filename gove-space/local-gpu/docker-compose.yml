@@ -1,0 +1,15 @@
+services:
+  gove-tts:
+    build: .
+    image: gove-tts-local
+    container_name: gove-tts
+    ports:
+      - "7860:7860"
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
