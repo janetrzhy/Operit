@@ -44,7 +44,8 @@ RUN pip install --no-cache-dir \
 # This puts the cold-start cost into the build, not the first user request.
 COPY download_assets.py /app/download_assets.py
 RUN python download_assets.py \
-    && chmod -R a+rX /app/nltk_data /app/ref_audio /app/GPT_SoVITS/pretrained_models
+    && mkdir -p /app/GPT_SoVITS/pretrained_models/fast_langdetect \
+    && chmod -R a+rwX /app/nltk_data /app/ref_audio /app/GPT_SoVITS/pretrained_models
 
 # ---- our config + the simple OpenAI-compatible endpoint patch ----
 COPY tts_infer.yaml /app/tts_infer.yaml

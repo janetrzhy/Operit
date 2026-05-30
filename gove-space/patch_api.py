@@ -8,8 +8,11 @@ The snippet adds:
   POST /v1/audio/speech   (OpenAI-style: {"input": "..."} -> wav)
   GET  /healthz
   a startup warmup so the model is hot before the first real request.
+
+Language is detected manually (zh vs en) to AVOID fast-langdetect, which tries
+to download/cache a model into pretrained_models/fast_langdetect at runtime and
+fails on the read-only / non-root HF Spaces filesystem.
 """
-import io
 import re
 
 API = "api_v2.py"
@@ -28,6 +31,30 @@ class SimpleTTSRequest(_BaseModel):
     response_format: str = "wav"
     speed: float = 1.0
 
+def _gove_lang(text):
+    """Pick a concrete language, never 'auto' (avoids fast-langdetect)."""
+    cfg = getattr(_gcfg, "GOVE_TEXT_LANG", "auto")
+    if cfg and cfg != "auto":
+        return cfg
+    has_zh = any('\\u4e00' <= c <= '\\u9fff' for c in text)
+    return "zh" if has_zh else "en"
+
+def _gove_req(text, speed=1.0):
+    return {
+        "text": text,
+        "text_lang": _gove_lang(text),
+        "ref_audio_path": _gcfg.GOVE_REF_AUDIO_PATH,
+        "prompt_text": _gcfg.GOVE_REF_PROMPT_TEXT,
+        "prompt_lang": _gcfg.GOVE_REF_PROMPT_LANG,
+        "media_type": "wav",
+        "streaming_mode": False,
+        "top_k": 15,
+        "top_p": 1.0,
+        "temperature": 1.0,
+        "text_split_method": _gcfg.GOVE_TEXT_SPLIT_METHOD,
+        "speed_factor": float(speed or 1.0),
+    }
+
 @APP.get("/healthz")
 async def _gove_healthz():
     return {"status": "ok"}
@@ -38,37 +65,13 @@ async def gove_simple_tts(request: SimpleTTSRequest):
     if not text:
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=400, content={"message": "input is required"})
-    req = {
-        "text": text,
-        "text_lang": _gcfg.GOVE_TEXT_LANG,
-        "ref_audio_path": _gcfg.GOVE_REF_AUDIO_PATH,
-        "prompt_text": _gcfg.GOVE_REF_PROMPT_TEXT,
-        "prompt_lang": _gcfg.GOVE_REF_PROMPT_LANG,
-        "media_type": "wav",
-        "streaming_mode": False,
-        "top_k": 15,
-        "top_p": 1.0,
-        "temperature": 1.0,
-        "text_split_method": _gcfg.GOVE_TEXT_SPLIT_METHOD,
-        "speed_factor": float(request.speed or 1.0),
-    }
-    return await tts_handle(req)
+    return await tts_handle(_gove_req(text, request.speed))
 
 @APP.on_event("startup")
 async def _gove_warmup():
     """Run one tiny synth so weights are hot; keeps the first real request fast."""
     try:
-        req = {
-            "text": "你好",
-            "text_lang": _gcfg.GOVE_TEXT_LANG,
-            "ref_audio_path": _gcfg.GOVE_REF_AUDIO_PATH,
-            "prompt_text": _gcfg.GOVE_REF_PROMPT_TEXT,
-            "prompt_lang": _gcfg.GOVE_REF_PROMPT_LANG,
-            "media_type": "wav",
-            "streaming_mode": False,
-            "text_split_method": _gcfg.GOVE_TEXT_SPLIT_METHOD,
-        }
-        await tts_handle(req)
+        await tts_handle(_gove_req("你好"))
         print(">> Gove warmup done.")
     except Exception as _e:
         print(">> Gove warmup skipped:", _e)
@@ -77,17 +80,16 @@ async def _gove_warmup():
 '''
 
 marker = re.search(r'^if __name__ == ["\']__main__["\']:', src, re.MULTILINE)
-if marker is None:
-    # Fallback: just append (works if upstream starts uvicorn elsewhere).
-    new_src = src + "\n" + SNIPPET
-    print("WARN: __main__ guard not found; appended snippet at end.")
-else:
-    idx = marker.start()
-    new_src = src[:idx] + SNIPPET + src[idx:]
 
 if "gove_simple_tts" in src:
     print("Patch already applied; skipping.")
 else:
+    if marker is None:
+        new_src = src + "\n" + SNIPPET
+        print("WARN: __main__ guard not found; appended snippet at end.")
+    else:
+        idx = marker.start()
+        new_src = src[:idx] + SNIPPET + src[idx:]
     with open(API, "w", encoding="utf-8") as f:
         f.write(new_src)
     print("Patched api_v2.py with /v1/audio/speech.")
