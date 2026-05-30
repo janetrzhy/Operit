@@ -63,7 +63,10 @@ class HttpVoiceProvider(
 
     companion object {
         private const val TAG = "HttpVoiceProvider"
-        private const val DEFAULT_TIMEOUT = 10 // 10秒超时
+        private const val DEFAULT_TIMEOUT = 15 // 连接超时
+        // 部分自建/云端TTS（如GPT-SoVITS免费CPU实例）合成较慢，且可能有冷启动，
+        // 读取超时需放宽，否则长句或首次请求会被10秒超时打断。
+        private const val READ_TIMEOUT = 120 // 读取超时（等待合成结果）
         private const val SPEECH_PREVIEW_MAX = 48
     }
 
@@ -75,7 +78,7 @@ class HttpVoiceProvider(
     private val httpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(DEFAULT_TIMEOUT.toLong(), TimeUnit.SECONDS)
-            .readTimeout(DEFAULT_TIMEOUT.toLong(), TimeUnit.SECONDS)
+            .readTimeout(READ_TIMEOUT.toLong(), TimeUnit.SECONDS)
             .writeTimeout(DEFAULT_TIMEOUT.toLong(), TimeUnit.SECONDS)
             .build()
     }
