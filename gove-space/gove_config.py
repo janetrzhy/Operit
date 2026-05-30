@@ -28,4 +28,14 @@ GOVE_REF_PROMPT_LANG = "en"   # zh | en | ja | auto
 # mixed Chinese + English text — exactly the Gove use case.
 GOVE_TEXT_LANG = "auto"
 GOVE_TEXT_SPLIT_METHOD = "cut5"
+
+# ----- speed / pitch tuning -----
+# Output is post-processed to match the original Gove voice:
+#   * GOVE_PITCH_SCALE   raises pitch AND speed together (WAV samplerate relabel)
+#   * GOVE_SPEED_FACTOR  is the model's time-stretch (changes speed, not pitch)
+# Final speed  = GOVE_SPEED_FACTOR * GOVE_PITCH_SCALE
+# Final pitch  = GOVE_PITCH_SCALE
+# Defaults give ~2x speed and ~1.5x pitch (1.333 * 1.5 = 2.0).
+GOVE_PITCH_SCALE = 1.5
+GOVE_SPEED_FACTOR = 1.333
 # =================================

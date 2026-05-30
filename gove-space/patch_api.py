@@ -10,8 +10,12 @@ The snippet adds:
   a startup warmup so the model is hot before the first real request.
 
 Language is detected manually (zh vs en) to AVOID fast-langdetect, which tries
-to download/cache a model into pretrained_models/fast_langdetect at runtime and
-fails on the read-only / non-root HF Spaces filesystem.
+to download/cache a model at runtime and fails on the non-root HF filesystem.
+
+Speed/pitch: the model applies GOVE_SPEED_FACTOR (time-stretch). Pitch is then
+raised by rewriting the WAV header sample rate by GOVE_PITCH_SCALE (which also
+speeds it up), so final speed = SPEED_FACTOR * PITCH_SCALE, final pitch =
+PITCH_SCALE. Defaults ~2x speed / ~1.5x pitch to match the original Gove voice.
 """
 import re
 
@@ -19,10 +23,12 @@ API = "api_v2.py"
 with open(API, "r", encoding="utf-8") as f:
     src = f.read()
 
-SNIPPET = '''
+SNIPPET = r'''
 # ===================== GOVE simple endpoint (injected) =====================
+import struct as _struct
 import gove_config as _gcfg
 from pydantic import BaseModel as _BaseModel
+from fastapi.responses import JSONResponse as _JSONResponse, Response as _Response
 
 class SimpleTTSRequest(_BaseModel):
     input: str = ""
@@ -36,10 +42,11 @@ def _gove_lang(text):
     cfg = getattr(_gcfg, "GOVE_TEXT_LANG", "auto")
     if cfg and cfg != "auto":
         return cfg
-    has_zh = any('\\u4e00' <= c <= '\\u9fff' for c in text)
+    has_zh = any('一' <= c <= '鿿' for c in text)
     return "zh" if has_zh else "en"
 
-def _gove_req(text, speed=1.0):
+def _gove_req(text, speed_mult=1.0):
+    base_speed = float(getattr(_gcfg, "GOVE_SPEED_FACTOR", 1.0))
     return {
         "text": text,
         "text_lang": _gove_lang(text),
@@ -52,8 +59,43 @@ def _gove_req(text, speed=1.0):
         "top_p": 1.0,
         "temperature": 1.0,
         "text_split_method": _gcfg.GOVE_TEXT_SPLIT_METHOD,
-        "speed_factor": float(speed or 1.0),
+        "speed_factor": base_speed * float(speed_mult or 1.0),
     }
+
+def _gove_pitch_wav(data, scale):
+    """Raise pitch+speed by rewriting the WAV fmt chunk sample rate by `scale`.
+    Cheap and lossless; players honor the header. Returns modified bytes."""
+    try:
+        if not scale or abs(scale - 1.0) < 1e-3:
+            return data
+        if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+            return data
+        buf = bytearray(data)
+        pos = 12
+        n = len(buf)
+        while pos + 8 <= n:
+            cid = bytes(buf[pos:pos+4])
+            csz = _struct.unpack_from("<I", buf, pos+4)[0]
+            if cid == b"fmt ":
+                sr = _struct.unpack_from("<I", buf, pos+12)[0]
+                br = _struct.unpack_from("<I", buf, pos+16)[0]
+                _struct.pack_into("<I", buf, pos+12, int(sr * scale))
+                _struct.pack_into("<I", buf, pos+16, int(br * scale))
+                break
+            pos += 8 + csz + (csz & 1)
+        return bytes(buf)
+    except Exception:
+        return data
+
+async def _gove_synth(text, speed_mult=1.0):
+    resp = await tts_handle(_gove_req(text, speed_mult))
+    # Only post-process successful WAV responses.
+    if isinstance(resp, _Response) and getattr(resp, "media_type", "") == "audio/wav":
+        body = getattr(resp, "body", None)
+        if body:
+            scale = float(getattr(_gcfg, "GOVE_PITCH_SCALE", 1.0))
+            return _Response(_gove_pitch_wav(bytes(body), scale), media_type="audio/wav")
+    return resp
 
 @APP.get("/healthz")
 async def _gove_healthz():
@@ -63,15 +105,14 @@ async def _gove_healthz():
 async def gove_simple_tts(request: SimpleTTSRequest):
     text = (request.input or "").strip()
     if not text:
-        from fastapi.responses import JSONResponse
-        return JSONResponse(status_code=400, content={"message": "input is required"})
-    return await tts_handle(_gove_req(text, request.speed))
+        return _JSONResponse(status_code=400, content={"message": "input is required"})
+    return await _gove_synth(text, request.speed)
 
 @APP.on_event("startup")
 async def _gove_warmup():
     """Run one tiny synth so weights are hot; keeps the first real request fast."""
     try:
-        await tts_handle(_gove_req("你好"))
+        await _gove_synth("你好")
         print(">> Gove warmup done.")
     except Exception as _e:
         print(">> Gove warmup skipped:", _e)
