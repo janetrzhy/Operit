@@ -1,0 +1,9 @@
+# Extra pins on top of GPT-SoVITS' own requirements.txt.
+# Most deps are already installed by the engine's requirements; these just
+# guarantee the API server + asset download work on the slim image.
+huggingface_hub>=0.23.0
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+pydantic>=2.0.0
+soundfile>=0.12.1
+requests>=2.31.0
