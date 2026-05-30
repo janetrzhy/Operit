@@ -43,8 +43,10 @@ RUN pip install --no-cache-dir \
 # ---- download model assets at BUILD time (baked into the image) ----
 # This puts the cold-start cost into the build, not the first user request.
 COPY download_assets.py /app/download_assets.py
-RUN python download_assets.py \
-    && mkdir -p /app/GPT_SoVITS/pretrained_models/fast_langdetect \
+RUN mkdir -p /app/nltk_data /app/ref_audio /app/GPT_SoVITS/pretrained_models/fast_langdetect \
+    && python download_assets.py \
+    && python -m nltk.downloader -d /app/nltk_data \
+         averaged_perceptron_tagger_eng averaged_perceptron_tagger cmudict \
     && chmod -R a+rwX /app/nltk_data /app/ref_audio /app/GPT_SoVITS/pretrained_models
 
 # ---- our config + the simple OpenAI-compatible endpoint patch ----
