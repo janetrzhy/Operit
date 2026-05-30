@@ -59,4 +59,19 @@ with open(prompt_path, "w", encoding="utf-8") as f:
 
 print("   ref audio  ->", ref_path)
 print("   ref prompt ->", repr(stem))
+
+# 4) NLTK data needed for English G2P (newer NLTK renamed these with _eng).
+print(">> downloading NLTK data for English text ...")
+import nltk
+for pkg in (
+    "averaged_perceptron_tagger_eng",
+    "averaged_perceptron_tagger",
+    "cmudict",
+):
+    try:
+        nltk.download(pkg)
+        print("   nltk:", pkg, "ok")
+    except Exception as e:
+        print("   nltk download failed:", pkg, e)
+
 print(">> all assets ready.")
