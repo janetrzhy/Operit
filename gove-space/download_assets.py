@@ -61,15 +61,20 @@ print("   ref audio  ->", ref_path)
 print("   ref prompt ->", repr(stem))
 
 # 4) NLTK data needed for English G2P (newer NLTK renamed these with _eng).
+# IMPORTANT: HF Spaces runs the container as a non-root user, so we must store
+# this in a fixed, world-readable dir (NLTK_DATA=/app/nltk_data) instead of the
+# build-time root HOME, otherwise the runtime process can't find it.
 print(">> downloading NLTK data for English text ...")
 import nltk
+nltk_dir = os.environ.get("NLTK_DATA", "/app/nltk_data")
+os.makedirs(nltk_dir, exist_ok=True)
 for pkg in (
     "averaged_perceptron_tagger_eng",
     "averaged_perceptron_tagger",
     "cmudict",
 ):
     try:
-        nltk.download(pkg)
+        nltk.download(pkg, download_dir=nltk_dir)
         print("   nltk:", pkg, "ok")
     except Exception as e:
         print("   nltk download failed:", pkg, e)

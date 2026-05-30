@@ -4,6 +4,7 @@ FROM python:3.10-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
     HF_HOME=/app/.cache/huggingface \
+    NLTK_DATA=/app/nltk_data \
     PYTHONUNBUFFERED=1 \
     GOVE_PORT=7860
 
@@ -42,7 +43,8 @@ RUN pip install --no-cache-dir \
 # ---- download model assets at BUILD time (baked into the image) ----
 # This puts the cold-start cost into the build, not the first user request.
 COPY download_assets.py /app/download_assets.py
-RUN python download_assets.py
+RUN python download_assets.py \
+    && chmod -R a+rX /app/nltk_data /app/ref_audio /app/GPT_SoVITS/pretrained_models
 
 # ---- our config + the simple OpenAI-compatible endpoint patch ----
 COPY tts_infer.yaml /app/tts_infer.yaml
