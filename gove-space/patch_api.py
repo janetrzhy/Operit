@@ -5,17 +5,23 @@ right before the `if __name__ == "__main__":` guard, so it reuses the already
 defined `APP`, `tts_handle`, and `tts_pipeline` objects.
 
 The snippet adds:
-  POST /v1/audio/speech   (OpenAI-style: {"input": "..."} -> wav)
+  POST /v1/audio/speech   (OpenAI-style: {"input": "..."} -> streaming wav)
   GET  /healthz
   a startup warmup so the model is hot before the first real request.
 
-Language is detected manually (zh vs en) to AVOID fast-langdetect, which tries
-to download/cache a model at runtime and fails on the non-root HF filesystem.
+WHY STREAMING: clients like Operit use a per-read socket timeout (e.g. 10s) that
+measures the gap *between* received data packets, not the total request time. A
+slow CPU backend that buffers the whole clip (30s+) sends nothing for 30s and
+trips that timeout. By streaming (streaming_mode=True) we emit the WAV header
+immediately and then PCM chunks as they're synthesized, so data keeps flowing
+and the read timeout never fires — even on a free CPU.
 
-Speed/pitch: the model applies GOVE_SPEED_FACTOR (time-stretch). Pitch is then
-raised by rewriting the WAV header sample rate by GOVE_PITCH_SCALE (which also
-speeds it up), so final speed = SPEED_FACTOR * PITCH_SCALE, final pitch =
-PITCH_SCALE. Defaults ~2x speed / ~1.5x pitch to match the original Gove voice.
+SPEED/PITCH: we relabel the streamed WAV header's sample rate by
+GOVE_PITCH_SCALE (raises pitch AND speed); the model also time-stretches by
+GOVE_SPEED_FACTOR. Final speed = SPEED_FACTOR * PITCH_SCALE, pitch = PITCH_SCALE.
+
+Language is detected manually (zh vs en) to AVOID fast-langdetect's runtime
+cache issues on the non-root HF filesystem.
 """
 import re
 
@@ -28,7 +34,7 @@ SNIPPET = r'''
 import struct as _struct
 import gove_config as _gcfg
 from pydantic import BaseModel as _BaseModel
-from fastapi.responses import JSONResponse as _JSONResponse, Response as _Response
+from fastapi.responses import JSONResponse as _JSONResponse, StreamingResponse as _StreamingResponse
 
 class SimpleTTSRequest(_BaseModel):
     input: str = ""
@@ -54,25 +60,25 @@ def _gove_req(text, speed_mult=1.0):
         "prompt_text": _gcfg.GOVE_REF_PROMPT_TEXT,
         "prompt_lang": _gcfg.GOVE_REF_PROMPT_LANG,
         "media_type": "wav",
-        "streaming_mode": False,
+        "streaming_mode": True,
         "top_k": 15,
         "top_p": 1.0,
         "temperature": 1.0,
         "text_split_method": _gcfg.GOVE_TEXT_SPLIT_METHOD,
         "speed_factor": base_speed * float(speed_mult or 1.0),
+        "parallel_infer": False,
     }
 
-def _gove_pitch_wav(data, scale):
-    """Raise pitch+speed by rewriting the WAV fmt chunk sample rate by `scale`.
-    Cheap and lossless; players honor the header. Returns modified bytes."""
+def _gove_relabel_header(data, scale):
+    """Rewrite a WAV header's sample rate / byte rate by `scale` (pitch+speed).
+    Only touches the fmt chunk; PCM data passes through untouched."""
     try:
         if not scale or abs(scale - 1.0) < 1e-3:
             return data
-        if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        if len(data) < 12 or data[:4] != b"RIFF" or data[8:12] != b"WAVE":
             return data
         buf = bytearray(data)
-        pos = 12
-        n = len(buf)
+        pos, n = 12, len(buf)
         while pos + 8 <= n:
             cid = bytes(buf[pos:pos+4])
             csz = _struct.unpack_from("<I", buf, pos+4)[0]
@@ -87,15 +93,25 @@ def _gove_pitch_wav(data, scale):
     except Exception:
         return data
 
-async def _gove_synth(text, speed_mult=1.0):
+async def _gove_stream(text, speed_mult=1.0):
+    """Return a StreamingResponse. Keeps bytes flowing so per-read client
+    timeouts never fire, and relabels the first (header) chunk for pitch."""
     resp = await tts_handle(_gove_req(text, speed_mult))
-    # Only post-process successful WAV responses.
-    if isinstance(resp, _Response) and getattr(resp, "media_type", "") == "audio/wav":
-        body = getattr(resp, "body", None)
-        if body:
-            scale = float(getattr(_gcfg, "GOVE_PITCH_SCALE", 1.0))
-            return _Response(_gove_pitch_wav(bytes(body), scale), media_type="audio/wav")
-    return resp
+    # Errors come back as JSONResponse — pass straight through.
+    if not isinstance(resp, _StreamingResponse):
+        return resp
+    scale = float(getattr(_gcfg, "GOVE_PITCH_SCALE", 1.0))
+    inner = resp.body_iterator
+
+    async def gen():
+        first = True
+        async for chunk in inner:
+            if first:
+                chunk = _gove_relabel_header(bytes(chunk), scale)
+                first = False
+            yield chunk
+
+    return _StreamingResponse(gen(), media_type="audio/wav")
 
 @APP.get("/healthz")
 async def _gove_healthz():
@@ -106,13 +122,16 @@ async def gove_simple_tts(request: SimpleTTSRequest):
     text = (request.input or "").strip()
     if not text:
         return _JSONResponse(status_code=400, content={"message": "input is required"})
-    return await _gove_synth(text, request.speed)
+    return await _gove_stream(text, request.speed)
 
 @APP.on_event("startup")
 async def _gove_warmup():
     """Run one tiny synth so weights are hot; keeps the first real request fast."""
     try:
-        await _gove_synth("你好")
+        resp = await _gove_stream("你好")
+        if isinstance(resp, _StreamingResponse):
+            async for _ in resp.body_iterator:
+                pass
         print(">> Gove warmup done.")
     except Exception as _e:
         print(">> Gove warmup skipped:", _e)
