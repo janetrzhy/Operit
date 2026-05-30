@@ -22,6 +22,8 @@ snapshot_download(
     allow_patterns=[
         "chinese-roberta-wwm-ext-large/*",
         "chinese-hubert-base/*",
+        # SV (speaker-verification) model required by v2Pro weights like Gove.pth
+        "sv/*",
     ],
 )
 
