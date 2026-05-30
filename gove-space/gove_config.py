@@ -6,7 +6,10 @@
 # normally DON'T need to touch anything here.
 import os
 
-_REF_DIR = "ref_audio"
+# Resolve everything relative to THIS file's directory and make it absolute,
+# so it never depends on the process working directory.
+_BASE = os.path.dirname(os.path.abspath(__file__))
+_REF_DIR = os.path.join(_BASE, "ref_audio")
 GOVE_REF_AUDIO_PATH = os.path.join(_REF_DIR, "ref.wav")
 
 # Auto-load the transcript produced at build time; fall back if missing.
