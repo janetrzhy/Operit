@@ -26,8 +26,14 @@ RUN git clone --depth 1 --branch ${GPTSOVITS_REF} https://github.com/RVC-Boss/GP
 RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 # Then the engine's own requirements.
 RUN pip install --no-cache-dir -r requirements.txt || true
-COPY requirements-extra.txt /app/requirements-extra.txt
-RUN pip install --no-cache-dir -r requirements-extra.txt
+# Extra pins for the API server + asset download (inlined to avoid an extra file).
+RUN pip install --no-cache-dir \
+    "huggingface_hub>=0.23.0" \
+    "fastapi>=0.100.0" \
+    "uvicorn[standard]>=0.23.0" \
+    "pydantic>=2.0.0" \
+    "soundfile>=0.12.1" \
+    "requests>=2.31.0"
 
 # ---- download model assets at BUILD time (baked into the image) ----
 # This puts the cold-start cost into the build, not the first user request.
