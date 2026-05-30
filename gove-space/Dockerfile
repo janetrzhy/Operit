@@ -22,10 +22,14 @@ RUN git clone --depth 1 --branch ${GPTSOVITS_REF} https://github.com/RVC-Boss/GP
     || (git clone https://github.com/RVC-Boss/GPT-SoVITS.git /tmp/gsv && cp -rT /tmp/gsv /app)
 
 # ---- python deps ----
-# Install CPU-only torch first to keep the image small and avoid CUDA wheels.
-RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu
-# Then the engine's own requirements.
+# Install the engine's own requirements first (it may pull a torch build).
 RUN pip install --no-cache-dir -r requirements.txt || true
+# Then force a single MATCHING CPU pair of torch + torchaudio LAST, so nothing
+# can leave torchaudio linked against a different torch ABI (the cause of the
+# "undefined symbol: aoti_torch_abi_version" crash).
+RUN pip install --no-cache-dir --force-reinstall \
+    torch==2.4.1 torchaudio==2.4.1 \
+    --index-url https://download.pytorch.org/whl/cpu
 # Extra pins for the API server + asset download (inlined to avoid an extra file).
 RUN pip install --no-cache-dir \
     "huggingface_hub>=0.23.0" \
