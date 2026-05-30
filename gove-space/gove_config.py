@@ -1,19 +1,28 @@
-# ===== Gove reference config — the ONLY thing you may need to tune =====
+# ===== Gove reference config =====
 #
-# GPT-SoVITS clones the timbre from a short reference clip. For best quality the
-# transcript below MUST match what is actually spoken in ref_audio/zh_ref.wav.
-#
-# >>> ACTION REQUIRED <<<
-# Open ref_audio/zh_ref.wav, listen to it, and paste the exact words it says
-# into GOVE_REF_PROMPT_TEXT. If the clip is English, also set PROMPT_LANG="en".
-# If you leave a slightly-wrong transcript it still works but timbre is weaker.
+# GPT-SoVITS clones the timbre from a short reference clip + its transcript.
+# download_assets.py grabs the wav from the HF Gove repo and writes the
+# transcript (derived from the filename) to ref_audio/ref_prompt.txt, so you
+# normally DON'T need to touch anything here.
+import os
 
-GOVE_REF_AUDIO_PATH = "ref_audio/zh_ref.wav"
-GOVE_REF_PROMPT_TEXT = "请把这句话替换成参考音频里实际说的内容"
-GOVE_REF_PROMPT_LANG = "zh"   # zh | en | ja | auto
+_REF_DIR = "ref_audio"
+GOVE_REF_AUDIO_PATH = os.path.join(_REF_DIR, "ref.wav")
+
+# Auto-load the transcript produced at build time; fall back if missing.
+_prompt_file = os.path.join(_REF_DIR, "ref_prompt.txt")
+if os.path.exists(_prompt_file):
+    with open(_prompt_file, "r", encoding="utf-8") as _f:
+        GOVE_REF_PROMPT_TEXT = _f.read().strip()
+else:
+    GOVE_REF_PROMPT_TEXT = ""
+
+# The HF reference clip is English, so its prompt language is English.
+# (Cross-lingual v2 still synthesizes Chinese fine from an English reference.)
+GOVE_REF_PROMPT_LANG = "en"   # zh | en | ja | auto
 
 # Synthesis language for the simple endpoint. "auto" lets one endpoint handle
-# mixed Chinese + English text — which is exactly the Gove use case.
+# mixed Chinese + English text — exactly the Gove use case.
 GOVE_TEXT_LANG = "auto"
 GOVE_TEXT_SPLIT_METHOD = "cut5"
-# ======================================================================
+# =================================

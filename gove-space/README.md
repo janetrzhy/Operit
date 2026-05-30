@@ -23,8 +23,11 @@ license: mit
 ## 部署步骤
 1. 在 HF 新建一个 **Docker** SDK 的 Space，Hardware 选 **CPU basic（免费）**。
 2. 把本目录所有文件上传到该 Space 仓库根目录（用 git 推送即可，无需手动传大模型——模型在构建时自动下载）。
-3. 等待 Build 完成、状态变 **Running**（首次构建较久，要下 ~2GB 模型）。
-4. **重要**：打开 `gove_config.py`，把 `GOVE_REF_PROMPT_TEXT` 改成 `ref_audio/zh_ref.wav` 里实际说的话（不改也能出声，但音色更弱）。
+3. 等待 Build 完成、状态变 **Running**（首次构建较久，要下 ~2GB 模型 + Gove 权重）。
+
+> 模型权重（Gove.ckpt / Gove.pth）和参考音频都在构建时**自动从 HF 下载**，
+> 你不需要手动上传任何大文件，也不需要手填参考文本——参考文本由参考音频的
+> 文件名自动推导。`gove_config.py` 开箱即用。
 
 ## 测试
 ```bash

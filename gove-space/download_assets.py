@@ -32,42 +32,29 @@ for fn in ("Gove.ckpt", "Gove.pth"):
     print("   got", p)
 
 # 3) Reference audio.
-# GPT-SoVITS needs a short reference clip + its exact transcript (set in gove_config.py).
-# The OmniDimen/Gove GitHub repo ships labelled demo clips; we grab the Chinese one,
-# which also works cross-lingually for English synthesis in v2.
-print(">> downloading reference audio ...")
-ref_path = os.path.join(REF_DIR, "zh_ref.wav")
-got = False
-for url in (
-    # GitHub raw, Chinese-labelled demo clip (中.wav)
-    "https://raw.githubusercontent.com/OmniDimen/Gove/main/%E4%B8%AD.wav",
-):
-    try:
-        r = requests.get(url, timeout=60)
-        if r.ok and len(r.content) > 1000:
-            with open(ref_path, "wb") as f:
-                f.write(r.content)
-            got = True
-            print("   ref audio ->", ref_path, len(r.content), "bytes")
-            break
-    except Exception as e:
-        print("   ref download failed:", url, e)
+# GPT-SoVITS needs a short reference clip + its exact transcript.
+# The OmniDimen/Gove HF repo ships ONE wav whose *filename is the transcript*
+# (an English ChatGPT description). We download it and derive the prompt text
+# from the filename automatically, so no manual transcription is needed.
+print(">> downloading reference audio from HF model repo ...")
+from huggingface_hub import list_repo_files
 
-if not got:
-    # Fallback: the wav that lives in the HF model repo (long English filename).
-    try:
-        from huggingface_hub import list_repo_files
-        files = list_repo_files("OmniDimen/Gove")
-        wav = next((f for f in files if f.lower().endswith(".wav")), None)
-        if wav:
-            p = hf_hub_download(repo_id="OmniDimen/Gove", filename=wav, local_dir=REF_DIR)
-            shutil.copy(p, ref_path)
-            got = True
-            print("   ref audio (fallback) ->", ref_path)
-    except Exception as e:
-        print("   fallback ref download failed:", e)
+ref_path = os.path.join(REF_DIR, "ref.wav")
+prompt_path = os.path.join(REF_DIR, "ref_prompt.txt")
 
-if not got:
-    raise SystemExit("ERROR: could not obtain a reference audio clip. Add one manually to ref_audio/zh_ref.wav")
+files = list_repo_files("OmniDimen/Gove")
+wav = next((f for f in files if f.lower().endswith(".wav")), None)
+if not wav:
+    raise SystemExit("ERROR: no .wav found in OmniDimen/Gove. Add one to ref_audio/ref.wav manually.")
 
+p = hf_hub_download(repo_id="OmniDimen/Gove", filename=wav, local_dir=REF_DIR)
+shutil.copy(p, ref_path)
+
+# Derive transcript from the filename (strip dir, extension, trailing dots/spaces).
+stem = os.path.splitext(os.path.basename(wav))[0].strip().strip(".").strip()
+with open(prompt_path, "w", encoding="utf-8") as f:
+    f.write(stem)
+
+print("   ref audio  ->", ref_path)
+print("   ref prompt ->", repr(stem))
 print(">> all assets ready.")
