@@ -60,6 +60,37 @@ with open(prompt_path, "w", encoding="utf-8") as f:
 print("   ref audio  ->", ref_path)
 print("   ref prompt ->", repr(stem))
 
+# 3.5) fast-langdetect model.
+# GPT-SoVITS' LangSegmenter sets the fast_langdetect cache dir to
+# pretrained_models/fast_langdetect and expects lid.176.bin there. On the
+# non-root HF runtime it can't create the dir or download the model, which
+# causes "Cache directory not found" on any multi-segment / mixed text.
+# Pre-create the dir AND fetch the model at build time so runtime never has to.
+print(">> downloading fast-langdetect model (lid.176.bin) ...")
+fld_dir = os.path.join(PRETRAINED_DIR, "fast_langdetect")
+os.makedirs(fld_dir, exist_ok=True)
+fld_path = os.path.join(fld_dir, "lid.176.bin")
+if not os.path.exists(fld_path):
+    ok = False
+    for url in (
+        "https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin",
+        "https://huggingface.co/julien-c/fasttext-language-id/resolve/main/lid.176.bin",
+    ):
+        try:
+            with requests.get(url, stream=True, timeout=120) as r:
+                r.raise_for_status()
+                with open(fld_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=1 << 20):
+                        f.write(chunk)
+            if os.path.getsize(fld_path) > 1_000_000:
+                ok = True
+                print("   lid.176.bin ->", fld_path, os.path.getsize(fld_path), "bytes")
+                break
+        except Exception as e:
+            print("   langdetect download failed:", url, e)
+    if not ok:
+        print("   WARN: could not pre-download lid.176.bin; runtime may retry.")
+
 # 4) NLTK data needed for English G2P (newer NLTK renamed these with _eng).
 # IMPORTANT: HF Spaces runs the container as a non-root user, so we must store
 # this in a fixed, world-readable dir (NLTK_DATA=/app/nltk_data) instead of the
